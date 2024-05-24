@@ -1,0 +1,86 @@
+name: Deploy UI dev
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, codebuild]
+
+    env:
+      PRODUCTION: false
+      BASE_API_URL: "https://simplifidev-api.filelogix.net/"
+      CLIENT_ID: superadmin
+      CLIENT_SECRET: saqw21!@
+      HOME_PATH: /main/planner
+      SIMPLIFI_LOGO: "/assets/ico/simplifi-iplanner-logo.svg"
+      LOGIN_PATH: /login
+      TEST_PASSWORD: test
+      AUTH_SERVICE_URL: "auth-service"
+      TENANT_FACADE_URL: "tenant-user-facade"
+      CHAT_FACADE_URL: "chat-facade"
+      MESSAGE_TIME_OUT: 5000
+      AUTH_CLIENT_ID: 1
+      CRYPTO_SECRET_KEY: "simplifi-plantool-hopls"
+      ENV: dev
+      PLAN_FACADE_URL: planfacade
+      RECAPTCHA_KEY: "6Le6frUpAAAAAHpmRELm-SpLUGZId-4ZrtuUTIge"
+      NODE_OPTIONS: "--max-old-space-size=8192"
+
+    steps:
+    - name: Code Checkout
+      uses: actions/checkout@v3
+
+    - name: Set up GCP authentication
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        version: 'latest'
+        service_account_key: gcp-auth
+        project_id: simplifi-421806
+
+        # service_account_key: ${{ secrets.GCP_AUTH }}
+        # project_id: ${{ vars.PROJECT_ID}}   simplifi-421806
+
+    - name: Set up environment
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install apt-transport-https ca-certificates gnupg curl -y
+        sudo apt-get update -y && sudo apt-get install google-cloud-cli google-cloud-sdk-gke-gcloud-auth-plugin zip unzip -y
+
+    - name: Zip source code
+      run: |
+        echo ${{ github.sha }} > source.txt
+        /bin/rm -rf .git/ .gitignore
+        /usr/bin/zip -r spt-dev-ui.zip .
+
+    - name: Upload source code to GCS
+      run: |
+        gsutil cp spt-dev-ui.zip gs://simplifi-plantool-ui-sourcecode-dev/
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18.16.0'
+
+    # - name: Setup GCP
+    #   uses: google-github-actions/setup-gcloud@v2
+    #   with:
+    #      version: '>= 416.0.0'
+
+    - name: Install Angular CLI
+      run: |
+        npm install @angular/cli@12.2.18 -g
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Build the GitHub Code
+      run: npm run config && ng build --subresource-integrity --configuration=${{ env.ENV }}
+
+    - name: Upload build artifacts to GCP bucket
+      run: gsutil cp -r dist/simplifi-plantool-ui/browser gs://simplifi-ui/
+
+    - name: Run GCP cloudCDN cache invalidation
+      run: gcloud compute url-maps invalidate-cdn-cache simplifi-ui-load-balancer \ --path "/*"
